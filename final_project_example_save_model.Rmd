@@ -1,0 +1,185 @@
+---
+title: "INFSCI 2595 Fall 2021 - Final Project"
+subtitle: "Example: read data, save, and reload model object"
+author: "Dr. Joseph P. Yurko"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This RMarkdown shows how to download the final project data. It shows how to compile the two input sets with the outputs and define the regression data vs classification data. It also demonstrates how to fit a simple model (with `lm()`), save that model, and load it back into the workspace. You may find these actions helpful as you work through the project.  
+
+## Load packages
+
+This example uses the `tidyverse` suite of packages.  
+
+```{r, load_tidyverse}
+library(tidyverse)
+```
+
+## Starting data
+
+There are multiple data sets associated with the final project. You will start with a small, simplified design. This will allow you to get practice fitting models, selecting the best model, and making predictions. You will demonstrate selecting optimal input configurations with this simplified design before tackling the more complicated larger problem.  
+
+The simplified data set is read in below. It is assumed that this markdown is located in the same directory as the data. If you want to run this markdown yourself, you should download the data sets from Canvas and place them in the same directory as this .Rmd file. It is **highly** recommended that you work with an RStudio RProject when working on the final project.  
+
+```{r, read_start_data}
+df_start <- readr::read_csv('small_train_data.csv', col_names = TRUE)
+```
+
+The simplified design consists of 5 inputs, `x07`, `x09`, `x10`, `x11`, and `x21`, and one continuous output, `response`. The input variable names are consistent with the larger data set hence why their numbering does not start with `x01`. A glimpse of the data is given below.  
+
+```{r, show_small_df}
+df_start %>% glimpse()
+```
+
+You will begin the project by fitting linear models to predict the output, `response`, based on the 5 inputs in the small design of `r nrow(df_start)` observations.  
+
+Let's fit a simple model to this data set. I do not recommend the following model. It is just to demonstrate fitting a model and the code to save that model.  
+
+```{r, fit_simple_lm}
+mod01 <- lm( response ~ x07, data = df_start )
+```
+
+
+The model summary is shown below.  
+
+```{r, show_mod01_summary}
+mod01 %>% summary()
+```
+
+Let’s go ahead and save `mod01`. There are multiple approaches for saving objects including `.Rda` and `.rds`. I prefer to use the `.rds` object because it’s more streamlined and makes it easier to save and reload a single object, which in our case is a model object. We can use the base `R` `saveRDS()` function or the `tidyverse` equivalent `write_rds()` function from the readr package. I prefer to use the `tidyverse` version.
+
+The code chunk below pipes the `mod01` object into `readr::write_rds()`. It saves the object to a file in the local working directory for simplicity. Notice that the `.rds` extension is included after the desired file name.  
+
+```{r, save_one_model}
+mod01 %>% readr::write_rds("my_simple_example_model.rds")
+```
+
+
+If you ran the above code chunk, check your working directory with the Files tab. You should see the `my_simple_example_model.rds` in your current working directory.
+
+Let’s now load in that model, but assign it to a different variable name. We can read in an `.rds` file with the `readr::read_rds()` function.  
+
+```{r, reload_simple_model}
+re_load_mod01 <- readr::read_rds("my_simple_example_model.rds")
+```
+
+
+We can now work with the `re_load_mod01` object just like the original model we fit, `mod01`. So we can use `summary()` and another other function on the model object, like `predict()`. To confirm let’s print out the summary below.  
+
+```{r, show_reload_summary}
+re_load_mod01 %>% summary()
+```
+
+And to confirm let’s check that the models are in fact the same.  
+
+```{r, check_mods_are_same}
+all.equal(mod01, re_load_mod01)
+```
+
+## Large data
+
+After you have gone through fitting non-Bayesian and Bayesian linear models with the small simplified design, you will work with the larger more challenging data.  
+
+The large data are divided into three data sets because as part of the project you must consider two different sets of input features. You must train models to predict the responses as a function of the first input set, "the x-variables", then you must train models to predict the responses as a function of the second input set, "the v-variables". You will identify which input set produces models with better performance, or if the input set ultimately does not matter.  
+
+### Inputs: x-variables
+
+The first input set, "the x-variables" are loaded below.  
+
+```{r, read_x_variables}
+train_x <- readr::read_csv("train_input_set_x.csv", col_names = TRUE)
+```
+
+A glimpse of the "x-variable" training data are shown below. The first column `run_id` is **NOT** an input that you should consider. The `run_id` column is a unique identifier (a key) that uniquely defines each row in the data. There are 43 "x-variable" inputs with names `x01` through `x43`.  
+
+```{r, show_x_variables}
+train_x %>% glimpse()
+```
+
+### Inputs: v-variables
+
+The second input set, "the v-variables", are read in below.  
+
+```{r, read_v_variables}
+train_v <- readr::read_csv("train_input_set_v.csv", col_names = TRUE)
+```
+
+The glimpse shown below again reveals that the first column is the identifier `run_id`. There are 41 "v-variables" with names `v01` through `v41`.  
+
+```{r, show_v_variables}
+train_v %>% glimpse()
+```
+
+### Outputs
+
+The training outputs are read in for you below.  
+
+```{r, read_output_data}
+train_outputs <- readr::read_csv("train_outputs.csv", col_names = TRUE)
+```
+
+The `train_outputs` dataframe has 3 columns. The first column is again `run_id` the unique identifier per row. The second column, `response`, is the continuous output. The third column, `outcome`, is the discrete binary outcome. The glimpse of `train_outputs` is shown below.  
+
+```{r, show_train_outputs}
+train_outputs %>% glimpse()
+```
+
+## Compile data
+
+The unique identifier, `run_id`, is included in all three data sets associated with the complete or large problem. The data sets can be joined or merged to create the complete set of inputs and outputs as required.  
+
+### Regression problem
+
+The complete training set of all "x-variable" inputs and the continuous output are compiled below. After joining the data together, the `run_id` and `outcome` columns are removed to provide you a data set of just "x-variable" inputs and `response`. The glimpse of the joined data set, `ready_x_A` is provided below. The continuous output, `response`, is the last column in the data set.  
+
+```{r, make_train_set_x_A}
+ready_x_A <- train_x %>% 
+  left_join(train_outputs, by = 'run_id') %>% 
+  select(-run_id, -outcome)
+
+ready_x_A %>% glimpse()
+```
+
+The complete training set of all "v-variable" inputs and the continuous response is created below. The steps are the same as those used to create the complete "x-variable" training set. The finalized ready training set is named `ready_v_A` and is shown as a glimpse below.  
+
+```{r, make_train_set_v_A}
+ready_v_A <- train_v %>% 
+  left_join(train_outputs, by = 'run_id') %>% 
+  select(-run_id, -outcome)
+
+ready_v_A %>% glimpse()
+```
+
+### Classification problem
+
+The classification training data set for the "x-variables" is created below. The continuous output, `response`, is now dropped while the categorical variable `outcome` is retained with the "x-variable" inputs. The `outcome` variable is converted to a factor data type for you so that way all students will work with the same level (unique category) ordering. The classification training set for the "x-variables" is named `ready_x_B` and is shown via a glimpse below.  
+
+```{r, make_train_set_x_B}
+ready_x_B <- train_x %>% 
+  left_join(train_outputs, by = 'run_id') %>% 
+  select(-run_id, -response) %>% 
+  mutate(outcome = factor(outcome, levels = c("event", "non_event")))
+
+ready_x_B %>% glimpse()
+```
+
+Lastly, the classification data set associated with the "v-variables" is created below. The data set is named `ready_v_B` and a glimpse is shown, which again shows that the output is the last column in the data set.  
+
+```{r, make_train_set_v_B}
+ready_v_B <- train_v %>% 
+  left_join(train_outputs, by = 'run_id') %>% 
+  select(-run_id, -response) %>% 
+  mutate(outcome = factor(outcome, levels = c("event", "non_event")))
+
+ready_v_B %>% glimpse()
+```
+
+## Conclusion
+
+This report demonstrates how to read in the data and get it ready for each of the major tasks in the final project.  

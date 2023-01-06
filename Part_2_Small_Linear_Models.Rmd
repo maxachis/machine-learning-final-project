@@ -1,0 +1,184 @@
+---
+title: "Part 2 - Small Problems With Linear Models"
+author: "Max Chis"
+date: "11/4/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rstanarm)
+library(here)
+library(caret)
+```
+
+
+## Introduction
+
+The following section focuses on the development, analysis, and visualization of linear models for the starting dataset. All models are fitted in the "Part_0_Model_Generation.Rmd" file. 
+
+## Best-performing linear models.
+
+I examined the AIC/BIC scores in order to determine which models had the best performance. My rationale was that AIC/BIC would appropriately account for the complexity of models and punish models that ran the risk of overfitting.
+ 
+```{r}
+extract_metrics <- function(mod_object, mod_name)
+{
+  broom::glance(mod_object) %>% 
+    mutate(model_name = mod_name)
+}
+
+all_fit_metrics <- purrr::map2_dfr(list(readRDS(here("models", "mod_start_additive_all.Rds")), 
+                                        readRDS(here("models", "mod_start_pairwise_all.Rds")),
+                                        readRDS(here("models", "mod_start_2nd_poly_all.Rds")),
+                                        readRDS(here("models", "mod_start_lq_ap_x09_x11.Rds")),
+                                        readRDS(here("models", "mod_start_spline_x09_x11.Rds")),
+                                        readRDS(here("models", "mod_start_interact_x09_x11.Rds"))),
+                                   c('mod_start_additive_all', 
+                                     'mod_start_pairwise_all', 
+                                     'mod_start_2nd_poly_all', 
+                                     'mod_start_lq_ap_x9_x11', 
+                                     'mod_start_spline_x09_x11', 
+                                     'mod_start_interact_x9_x11'),
+                                   extract_metrics)
+all_fit_metrics %>% column_to_rownames(., var = "model_name") %>% select(AIC, BIC)
+all_fit_metrics %>% ggplot(aes(x=model_name, y=AIC)) + geom_col() + theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust=1)) + ggtitle("AIC Scores of Models")
+all_fit_metrics %>% ggplot(aes(x=model_name, y=BIC)) + geom_col() + theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust=1)) + ggtitle("BIC Scores of Models")
+```
+
+Examining solely AIC/BIC values, mod_spline_x09_x11 and mod_lq_ap_x9_x11 appear best, with the spline found to be superior in AIC, and lq_ap_x9_x11 appearing superior in BIC.
+
+## Coefficient summaries and comparison of top 2 models.
+
+The plotted coefficient summaries for the top 2 models are provided below. 
+```{r}
+readRDS(here("models", "mod_start_spline_x09_x11.Rds")) %>% coefplot::coefplot()
+readRDS(here("models", "mod_start_lq_ap_x09_x11.Rds")) %>% coefplot::coefplot()
+```
+
+Because the features are so different (spline versus quadratic), it would be inappropriate to compare their coefficient values.
+
+## Fitting Bayesian Linear Models to top 2 models.
+
+### Waic Comparison
+I utilized stan_lm to fit the two top-performing linear models as identified in the prior section. I then compared the WAIC scores for their respective performance.
+
+```{r, eval=TRUE}
+mod_start_bayes_spline_x09_x11 <- readRDS(here("models", "mod_start_bayes_spline_x09_x11.Rds"))
+mod_start_bayes_lq_ap_x09_x11 <- readRDS(here("models", "mod_start_bayes_lq_ap_x09_x11.Rds"))
+```
+
+Calculate WAIC values
+```{r eval=TRUE, warning=FALSE}
+mod_start_bayes_lq_ap_x09_x11$waic <- mod_start_bayes_lq_ap_x09_x11 %>% waic()
+mod_start_bayes_spline_x09_x11$waic <- mod_start_bayes_spline_x09_x11 %>% waic()
+my_models <- stanreg_list(mod_start_bayes_lq_ap_x09_x11, mod_start_bayes_spline_x09_x11,
+                          model_names = c("Linear and quadratic additive with all-pairwise interactions for x09 and x11.", "Spline basis x09 and x11"))
+```
+
+Compare WAIC values.
+```{r}
+loo_compare(my_models, criterion = "waic")
+```
+
+Utilizing WAIC metric, spline basis function performs best. 
+
+### Visualization of best model coefficient posterior distributions
+
+```{r}
+mod_start_bayes_spline_x09_x11 %>% plot()
+```
+
+
+
+### Comparison of residual error posterior uncertainty with MLE
+
+```{r}
+as.data.frame(mod_start_bayes_spline_x09_x11) %>% tibble::as.tibble() %>%
+  ggplot(mapping = aes(x = sigma)) +
+  geom_histogram(bins = 55) +
+  geom_vline(xintercept = stats::sigma(mod_start_bayes_spline_x09_x11),
+             color = "darkorange", linetype = "dashed", size = 1.1) +
+  theme_bw() + ggtitle("Comparison of residual error posterior uncertainty with MLE")
+```
+
+Viewing this graph, we see that the posterior uncertainty on Sigma is roughly normally distributed around the MLE sigma. The posterior uncertainty is also relatively small and concentrated within a small interval.
+
+
+## Prediction visualization of top 2 models
+
+The below code visualizes the predictions for the Bayesian models. 
+
+
+```{r}
+#Create viz_grid
+viz_grid <- expand.grid(x11 = seq(from=0, to=1, length.out=101),
+                        x09 = seq(from=0, to=1, length.out=6),
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()  
+```
+
+```{r}
+posterior_linpred(mod_start_bayes_spline_x09_x11, newdata = viz_grid) %>% 
+  as.data.frame() %>% tibble::as_tibble() %>% 
+  tibble::rowid_to_column("post_id") %>% 
+  tidyr::gather(key = "pred_id", value = "value", -post_id) %>% 
+  mutate_at(c("pred_id"), as.numeric) %>% 
+  group_by(pred_id) %>% 
+  summarise(num_post = n(),
+            trend_avg = mean(value),
+            trend_lwr = quantile(value, 0.05),
+            trend_upr = quantile(value, 0.95)) %>% 
+  ungroup() %>% 
+  left_join(viz_grid %>% tibble::rowid_to_column("pred_id"),
+            by = "pred_id") %>% 
+  ggplot(aes(x=x11)) +   geom_ribbon(mapping = aes(
+    ymin = trend_lwr,
+    ymax = trend_upr,
+    group = x09,
+    fill=as.factor(x09)), alpha=0.5) + 
+  geom_line(mapping = aes(y = trend_avg, group = x09, color = as.factor(x09)), size=1.) + 
+  facet_wrap(~x09, labeller = "label_both") + labs(y = "mean trend") +
+  theme_bw() +
+  theme(legend.position = "top") + ggtitle("x11 Value vs Predicted Mean Trend, x09 Facets, Bayesian Splines")
+```
+
+```{r}
+posterior_linpred(mod_start_bayes_lq_ap_x09_x11, newdata = viz_grid) %>% 
+  as.data.frame() %>% tibble::as_tibble() %>% 
+  tibble::rowid_to_column("post_id") %>% 
+  tidyr::gather(key = "pred_id", value = "value", -post_id) %>% 
+  mutate_at(c("pred_id"), as.numeric) %>% 
+  group_by(pred_id) %>% 
+  summarise(num_post = n(),
+            trend_avg = mean(value),
+            trend_lwr = quantile(value, 0.05),
+            trend_upr = quantile(value, 0.95)) %>% 
+  ungroup() %>% 
+  left_join(viz_grid %>% tibble::rowid_to_column("pred_id"),
+            by = "pred_id") %>% 
+  ggplot(aes(x=x11)) +   geom_ribbon(mapping = aes(
+    ymin = trend_lwr,
+    ymax = trend_upr,
+    group = x09,
+    fill=as.factor(x09)), alpha=0.5) + 
+  geom_line(mapping = aes(y = trend_avg, group = x09, color = as.factor(x09)), size=1.) + 
+  facet_wrap(~x09, labeller = "label_both") + labs(y = "mean trend") +
+  theme_bw() +
+  theme(legend.position = "top") + ggtitle("x11 Value vs Predicted Mean Trend, x09 Facets, Bayesian Linear Quadratic")
+```
+
+
+### Comparing predictive trends
+
+The broad strokes of the predictive trends are similar, but the spline model is notably more flexible than the linear-quadratic all-pairs model. 
+
+### What values minimize the mean trend? 
+
+Setting both x09 and x11 to 1 minimizes the mean trend.
+

@@ -1,0 +1,484 @@
+---
+title: 'Part 0: Model Generation'
+author: "Max Chis"
+date: "11/25/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(eval = FALSE, include = FALSE)
+library(tidyverse)
+library(caret)
+library(here)
+library(Formula)
+```
+
+## Introduction
+
+This section generates and saves the models used in other sections of the Project. 
+
+This was done to save time when loading up the other .Rmd files, as some of these models take extended periods of time (greater than 10 minutes) to generate, and re-generating them every time I reopen RStudio strikes me as an inauspicious use of my time. 
+
+These are saved via saveRDS to the "models" folder.
+
+This shows the code used to generate each model, and not the output resulting from these generations, as in some cases these outputs became very verbose.
+
+Please consult the table of contents to the left for easy navigation.
+
+# Model Generation Setup
+
+## Data preprocessing
+
+Read datasets
+```{r, eval=TRUE, include=TRUE}
+df_start <- readr::read_csv('small_train_data.csv', col_names = TRUE)
+train_x <- readr::read_csv("train_input_set_x.csv", col_names = TRUE)
+train_v <- readr::read_csv("train_input_set_v.csv", col_names = TRUE)
+train_outputs <- readr::read_csv("train_outputs.csv", col_names = TRUE)
+```
+
+Join train_x with train_outputs's response, and do the same with train_v 
+```{r, eval=TRUE, include=TRUE}
+train_x_r <- train_x %>% left_join(train_outputs, by='run_id') %>% select(!c(run_id, outcome))
+train_v_r <- train_v %>% left_join(train_outputs, by='run_id') %>% select(!c(run_id, outcome))
+```
+
+Join train_x with train_output's outcome, made binary, and do the same with train_v
+```{r, eval=TRUE, include=TRUE}
+train_outputs$b_output <- as.factor(train_outputs$outcome)
+train_x_o <- train_x %>% left_join(train_outputs, by='run_id') %>% select(!c(run_id, response, outcome))
+train_v_o <- train_v %>% left_join(train_outputs, by='run_id') %>% select(!c(run_id, response, outcome))
+```
+
+## Custom Functions
+
+Function for quickly seeding and training multiple models at once.
+```{r, eval=TRUE, include=TRUE}
+trainModel <- function(method_str, form, metric_str, dta, ctrl, ...) {
+  set.seed(359)
+  print(paste("Training model", method_str, sep=" "))
+  train(form, 
+        data = dta,
+        method = method_str,
+        metric = metric_str,
+        preProcess = c("center", "scale"),
+        trControl = ctrl,
+        # ...
+        trace = F,
+        linout = F,
+        importance = 'impurity'
+        ) #importance needed only for ranger
+}
+```
+
+```{r, eval=TRUE, include=TRUE}
+run_name_save_multi_model <- function(filename, model_names, formula, metric, data, ctrl) {
+  m <- model_names %>% map(trainModel, form=formula, metric_str=metric, dta=data, ctrl=ctrl)
+  names(m) <- model_names
+  m %>% saveRDS(here("models", paste(filename, "Rds", sep=".")))
+}
+```
+
+
+
+## Constants
+
+A set of 6 models used repeatedly in part iii and part iv
+```{r, eval=TRUE, include=TRUE}
+mod_names <- c('glmnet',   #Elastic Net
+  'nnet',     #Neural Network
+  'ranger',   #Random Forest
+  'xgbTree',  #Gradient Boosted Tree
+  'svmPoly',  #Support Vector Machine with Polynomial Kernel
+  'kknn') #K-Nearest Neighbor
+```
+
+## Formulae
+
+Formula for spline of x09 and x11, response
+```{r, eval=TRUE, include=TRUE}
+form_spline_x09_x11 <- Formula(response ~ splines::ns(x09, df=5)*splines::ns(x11, df=5))
+```
+
+Formula for spline of x09 and x11, binary output
+```{r, eval=TRUE, include=TRUE}
+form_spline_x09_x11_b <- Formula(b_output ~ splines::ns(x09, df=5)*splines::ns(x11, df=5))
+```
+
+Formula for interactions, triplets, of spline of v01, v06, v10, response
+```{r, eval=TRUE, include=TRUE}
+form_spline_v01v06v10_r <- Formula(response ~ splines::ns(v01, df=5)*splines::ns(v06, df=5)*splines::ns(v10, df=5))
+```
+
+Formula for interactions, triplets, of spline of v01,v06,v10, binary output
+```{r, eval=TRUE, include=TRUE}
+form_spline_v01v06v10_b <- Formula(b_output ~ splines::ns(v01, df=5)*splines::ns(v06, df=5)*splines::ns(v10, df=5))
+```
+
+Formula for spline of v10 in interaction with the additive inputs of v01, v06, v08, response
+```{r, eval=TRUE, include=TRUE}
+form_spline_v10_int_v01v06_v08_r <- Formula(response ~ splines::ns(v10, df=5)*(v01+v06+v08))
+```
+
+Formula for spline of v10 in interaction with the additive inputs of v01, v06, v08, binary output
+```{r, eval=TRUE, include=TRUE}
+form_spline_v10_int_v01v06_v08_b <- Formula(b_output ~ splines::ns(v10, df=5)*(v01+v06+v08))
+```
+
+Formula for spline of pairs of v01, v06, v10, response
+```{r}
+form_v_6_models_spline_pairs_v01v06v10_r <- Formula(response ~ (splines::ns(v01, df=5) + splines::ns(v06, df=5) + splines::ns(v10, df=5))^2)
+```
+
+Formula for spline of pairs of v01, v06, v10, binary output
+```{r}
+form_v_6_models_spline_pairs_v01v06v10_b <- Formula(b_output ~ (splines::ns(v01, df=5) + splines::ns(v06, df=5) + splines::ns(v10, df=5))^2)
+```
+
+## Validation 
+
+Validation using simple 5-fold cross-validation, mainly due to speed concerns.
+```{r, eval=TRUE, include=TRUE}
+ctrl <- trainControl(
+  method='cv',
+  number = 5,
+  verboseIter = TRUE
+)
+```
+
+Control for calculating ROC
+```{r, eval=TRUE, include=TRUE}
+ctrl_ROC <- trainControl(
+  method='cv',
+  number=5,
+  verboseIter=T,
+  classProbs=T,
+  summaryFunction = twoClassSummary
+)
+```
+
+
+# Part 2
+
+## Linear Models
+
+### mod_start_additive_all
+All 5 starter inputs with additive features only
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ ., data=df_start) %>%
+saveRDS(here("models", "mod_start_additive_all.Rds"))
+```
+
+### mod_start_pairwise_all
+All pair-wise interactions with start inputs
+
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ .^2, data=df_start) %>%
+  saveRDS(here("models", "mod_start_pairwise_all.Rds"))
+```
+
+### mod_start_2nd_poly_all
+Polynomial basis of 2nd order applied to all 5 inputs
+
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ (
+    x07 + x09 + x10 + x11 + x21 + I(x07^2) + I(x09^2) + I(x10^2) + I(x11^2) + I(x21^2)
+  ), data=df_start) %>% 
+  saveRDS(here("models", "mod_start_2nd_poly_all.Rds"))
+```
+
+### mod_start_lq_ap_x9_x11
+Linear and quadratic additive with all-pairwise interactions for starter x09 and x11.
+
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ (x09+I(x09^2))*(x11+I(x11^2)), data = df_start) %>%
+  saveRDS(here("models", "mod_start_lq_ap_x09_x11.Rds"))
+```
+
+### mod_start_spline_x09_x11
+Spline basis for starter x09 and x11
+
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+mod_spline_x09_x11 <- lm(form_spline_x09_x11, data = df_start) %>%
+  saveRDS(here("models", "mod_start_spline_x09_x11.Rds"))
+```
+
+### mod_start_interact_x9_x11
+Interaction of starter x09 and x11 as well as x09 and x11 themselves.
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ (x09*x11), data = df_start) %>%
+  saveRDS(here("models", "mod_start_interact_x09_x11.Rds"))
+```
+
+## Bayesian model (Stan_lm)
+
+### mod_start_bayes_lq_ap_x9_x11
+Bayesian linear model for linear/quadratic additive with all-pairwise interactions for starter x09 and x11
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+stan_lm(response ~ (x09+I(x09^2))*(x11+I(x11^2)), 
+                 data = df_start,
+                 prior = NULL,
+                 seed = 432123) %>% 
+  saveRDS(here("models", "mod_start_bayes_lq_ap_x09_x11.Rds"))
+```
+Note: Received warning of "4 divergent transitions after warmup" upon running this.
+
+### mod_start_bayes_spline_x09_x11
+Bayesian linear model spline basis for starter x09 and x11
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+stan_lm(form_spline_x09_x11, data = df_start,
+                 prior = NULL,
+                 seed = 432123) %>% 
+  saveRDS(here("models", "mod_start_bayes_spline_x09_x11.Rds"))
+```
+
+
+# Part 3
+
+## X-Variable Models
+
+### mod_x_additive_all
+All x inputs with additive features
+```{r, eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ ., data=train_x_r) %>% 
+  saveRDS(here("models", "mod_x_additive_all.Rds"))
+```
+
+### mod_x_pairwise_all
+All x inputs and interactions
+```{r, eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ .^2, data=train_x_r) %>% 
+  saveRDS(here("models", "mod_x_pairwise_all.Rds"))
+```
+
+### mod_x_spline_x09_x11
+Spline models for x09 and x11
+```{r, eval=FALSE, include=TRUE}
+set.seed(359)
+lm(form_spline_x09_x11, data = train_x_r) %>% 
+  saveRDS(here("models", "mod_x_spline_x09_x11.Rds"))
+```
+
+### mod_x_enet_pairwise_all
+Regularized regression with Elastic net: All pair-wise interactions between x inputs
+```{r, eval=FALSE, include=TRUE}
+trainModel(method="glmnet", form=response ~ .^2, metric_str='RMSE', dta=train_x_r, ctrl=ctrl) %>%
+  saveRDS(here("models", "mod_x_enet_pairwise_all.Rds"))
+```
+Using proc.time() to time myself, this took roughly 1 minute to train.
+
+### mod_x_6_models_spline_x09_x11_RMSE
+
+Six different models for the spline of x09 and x11:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+```{r message=FALSE, warning=FALSE, results = 'hide', include=TRUE, eval=FALSE}
+run_name_save_multi_model(filename="mod_x_6_models_spline_x09_x11_RMSE", model_names=mod_names, formula=form_spline_x09_x11, metric='RMSE', data=train_x_r, ctrl=ctrl)
+```
+
+
+
+
+## V-Variable Models
+
+### mod_v_additive_all
+All v inputs with additive features
+```{r, eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ ., data=train_v_r) %>% saveRDS(here("models", "mod_v_additive_all.Rds"))
+```
+
+### mod_v_pairwise_all
+
+All v inputs with all pairwise interactions
+```{r, eval=FALSE, include=TRUE}
+set.seed(359)
+lm(response ~ .^2, data=train_v_r) %>% saveRDS(here("models", "mod_v_pairwise_all.Rds"))
+```
+
+### mod_v_enet_pairwise_all
+Regularized regression with Elastic net: All pair-wise interactions between v inputs
+```{r eval=FALSE, include=TRUE}
+trainModel(method="glmnet", form=response ~ .^2, metric_str='RMSE', dta=train_v_r, ctrl=ctrl) %>% 
+  saveRDS(here("models", "mod_v_enet_pairwise_all.Rds"))
+```
+Using proc.time() to time myself, this took roughly 5 minutes to train.
+
+### mod_v_6_models_spline_v01v06v10_RMSE
+Six different models for all pairwise and triplet interactions of the splines of v01, v06, and v10:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+```{r eval=FALSE, include=TRUE}
+run_name_save_multi_model(filename="mod_v_6_models_spline_v01v06v10_RMSE", model_names=mod_names, formula=form_spline_v01v06v10_r, metric='RMSE', data=train_v_r, ctrl=ctrl)
+```
+Note: Do not, for the love of God, run this again. It took several hours.
+
+### mod_v_6_models_spline_pairs_v01v06v10_r
+Six different models for all pairwise interactions of the splines of v01, v06, and v10:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+```{r}
+run_name_save_multi_model(filename="mod_v_6_models_spline_pairs_v01v06v10_r", model_names=mod_names, formula=form_v_6_models_spline_pairs_v01v06v10_r, metric='RMSE', data=train_v_r, ctrl=ctrl)
+```
+
+# Part 4
+
+## X-Variables
+
+### mod_x_additive_all_b
+All x inputs with additive features, with response value as binary output
+```{r eval=FALSE, include=FALSE}
+set.seed(359)
+glm(b_output ~ ., family = "binomial", data = train_x_o) %>% 
+  saveRDS(here("models","mod_x_additive_all_b.Rds"))
+```
+
+### mod_x_pairwise_all_b
+All x inputs with all pairwise interactions, with response value as binary output.
+```{r eval=FALSE, include=TRUE}
+ptm <- proc.time()
+m <- glm(b_output ~ .^2, family = "binomial", data = train_x_o) 
+m %>% saveRDS(here("models","mod_v_pairwise_all_b.Rds"))
+proc.time() - ptm
+```
+Results did not converge.
+Using proc.time() to time myself, this took 48 seconds to train.
+
+### mod_x_glmnet_pairwise_all_b
+
+## Accuracy
+Glmnet model of all x inputs with all pairwise interactions, with response value as binary input, modeled to maximize Accuracy.
+```{r eval=FALSE, include=TRUE}
+m <- trainModel(method="glmnet", form=b_output ~ .^2, metric_str='Accuracy', dta=train_x_o, ctrl=ctrl)
+m %>% saveRDS(here("models", "mod_x_glmnet_pairwise_all_b_Acc.Rds"))
+```
+
+## ROC/AUC
+Glmnet model of all x inputs with all pairwise interactions, with response value as binary input, modeled to maximize ROC/AUC.
+```{r eval=FALSE, include=TRUE}
+m <- trainModel(method="glmnet", form=b_output ~ .^2, metric_str='ROC', dta=train_x_o, ctrl=ctrl_ROC)
+m %>% saveRDS(here("models", "mod_x_glmnet_pairwise_all_b_ROC.Rds"))
+```
+
+### mod_x_6_models_spline_x09_x11_b
+
+####AUC/ROC
+Six different models for all pairwise interactions of the splines of x09 and x11,with response value as binary input, modeled to maximize ROC:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+
+
+```{r eval=FALSE, include=TRUE}
+run_name_save_multi_model(filename="mod_x_6_models_spline_x09_x11_b_AUC", model_names=mod_names, formula=form_spline_x09_x11_b, metric='ROC', data=train_x_o, ctrl=ctrl_ROC)
+```
+
+#### Accuracy
+Six different models for all pairwise interactions of the splines of x09 and x11,with response value as binary input, modeled to maximize Accuracy:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+
+```{r message=FALSE, warning=FALSE, results = 'hide', include=TRUE, eval=FALSE}
+run_name_save_multi_model(filename="mod_x_6_models_spline_x09_x11_b_Acc", model_names=mod_names, formula=form_spline_x09_x11_b, metric='Accuracy', data=train_x_o, ctrl=ctrl)
+```
+
+Time required to model: 280 seconds.
+
+## V-Variables
+
+### mod_v_additive_all_b
+All v inputs with additive features, with response value as binary output
+```{r eval=FALSE, include=TRUE}
+set.seed(359)
+m <- glm(b_output ~ ., family = "binomial", data = train_v_o) 
+m %>% saveRDS(here("models","mod_v_additive_all_b.Rds"))
+```
+
+
+### mod_v_pairwise_all_b
+All v inputs with additive features, with response value as binary output
+```{r eval=FALSE, include=TRUE}
+ptm <- proc.time()
+set.seed(359)
+m <- glm(b_output ~ .^2, family = "binomial", data = train_v_o) 
+m %>% saveRDS(here("models","mod_v_pairwise_all_b.Rds"))
+proc.time() - ptm
+```
+Result did not converge.
+Time required to model: 47 seconds.
+
+### mod_v_glmnet_pairwise_all_b
+
+#### Accuracy
+Glmnet model of all v inputs with all pairwise interactions, with response value as binary input, modeled to maximize Accuracy.
+```{r eval=FALSE, include=TRUE}
+m <- trainModel(method="glmnet", form=b_output ~ .^2, metric_str='Accuracy', dta=train_v_o, ctrl=ctrl)
+m %>% saveRDS(here("models", "mod_v_glmnet_pairwise_all_b_Acc.Rds"))
+```
+
+#### ROC/AUC
+Glmnet model of all v inputs with all pairwise interactions, with response value as binary input, modeled to maximize ROC/AUC
+```{r eval=FALSE, include=TRUE}
+m <- trainModel(method="glmnet", form=b_output ~ .^2, metric_str='ROC', dta=train_v_o, ctrl=ctrl_ROC)
+m %>% saveRDS(here("models", "mod_v_glmnet_pairwise_all_b_ROC.Rds"))
+```
+
+
+### mod_v_6_models_spline_pairs_v01v06v10
+
+#### Accuracy
+Six different models for all pairwise interactions of the splines of v01, v06 and v10, with response value as binary input, modeled to maximize Accuracy:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+```{r}
+run_name_save_multi_model(filename="mod_v_6_models_spline_pairs_v01v06v10_Accuracy", model_names=mod_names, formula=form_v_6_models_spline_pairs_v01v06v10_b, metric='Accuracy', data=train_v_o, ctrl=ctrl)
+```
+
+#### ROC
+Six different models for all pairwise interactions of the splines of v01, v06 and v10, with response value as binary input, modeled to maximize ROC:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+
+```{r}
+run_name_save_multi_model(filename="mod_v_6_models_spline_pairs_v01v06v10_ROC", model_names=mod_names, formula=form_v_6_models_spline_pairs_v01v06v10_b, metric='ROC', data=train_v_o, ctrl=ctrl_ROC)
+```

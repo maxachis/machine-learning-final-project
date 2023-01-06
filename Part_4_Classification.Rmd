@@ -1,0 +1,187 @@
+---
+title: "Part IV - Complete Problem Classification"
+author: "Max Chis"
+date: "11/22/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(here)
+```
+
+## Intro
+
+This section analyzes the performance of the binary classification models for the X and V variables.
+
+I utilized the same kind of models in Regression as in Classification, and thus I do not include "Models considered and used" sections in this part. My rationale was that their performance in both domains should be broadly similar, however I also checked this by comparing them to pairwise classification algorithms.
+
+For whatever reason, the pairwise linear models did not converge, and hence my analysis of those models were substantially more limited.
+
+## Comparing Linear Models
+
+### X Variables
+
+#### Linear additive features
+
+```{r}
+mod_additive_x_all_b <- readRDS(here("models","mod_x_additive_all_b.Rds"))
+mod_additive_x_all_b %>% broom::glance()
+```
+
+```{r, eval=TRUE}
+#Get names of significant coefficients
+sig_names <- summary(mod_additive_x_all_b)$coefficients %>% data.frame() %>% filter(Pr...z.. < 0.01) %>% rownames()
+#Plot significant coefficients
+mod_additive_x_all_b %>% coefplot::coefplot(coefficients=sig_names)
+```
+
+Similar to the regression scenario, x09 and x11 perform the best.
+
+#### All pair-wise interactions between inputs
+
+```{r}
+mod_pairwise_x_all_b <- readRDS(here("models","mod_x_pairwise_all_b.Rds"))
+mod_additive_x_all_b %>% broom::glance()
+```
+
+Because this algorithm did not converge, I will not use coefplot on this.
+
+### V Variables
+
+#### Linear additive features
+
+```{r}
+mod_v_additive_all_b <- readRDS(here("models", "mod_v_additive_all_b.Rds"))
+mod_v_additive_all_b %>% broom::glance()
+```
+
+```{r, eval=TRUE}
+#Get names of significant coefficients
+sig_names <- summary(mod_v_additive_all_b)$coefficients %>% data.frame() %>% filter(Pr...z.. < 0.05) %>% rownames()
+#Plot significant coefficients
+mod_v_additive_all_b %>% coefplot::coefplot(coefficients=sig_names)
+```
+
+Again, as in regression, v06 and v10 performed the best. However, in contrast to the regression model, v01 is notably missing as a significant value.
+
+#### All pair-wise interactions between inputs
+
+```{r}
+mod_v_pairwise_all_b <- readRDS(here("models", "mod_v_pairwise_all_b.Rds"))
+mod_v_pairwise_all_b %>% broom::glance()
+```
+
+Because this model did not converge, I will not plot the coefficients. 
+
+
+## Evaluate/Compare Caret Train Models
+
+### X Variable Models
+
+#### Accuracy
+
+```{r}
+xAcc <- list(
+  glmnet_x09_x10_spline_int = readRDS(here("models", "mod_x_6_models_spline_x09_x11_b_Acc.Rds"))$glmnet,
+  nnet_additive = readRDS(here("models", "mod_x_nnet_additive_Accuracy.Rds")),
+  ranger_additive = readRDS(here("models", "mod_x_ranger_additive_Accuracy.Rds")),
+  svmPoly_additive = readRDS(here("models", "mod_x_svmPoly_additive_Accuracy.Rds")),
+  kknn_additive = readRDS(here("models", "mod_x_kknn_additive_Accuracy.Rds")),
+  xgbTree = readRDS(here("models", "mod_x_xgbTree_additive_Accuracy.Rds")),
+  glmnet_pairwise_all = readRDS(here("models", "mod_x_glmnet_pairwise_all_b_Acc.Rds"))
+)
+xAcc %>% resamples %>% dotplot(metric="Accuracy", main="Accuracy for X Variable Models")
+```
+
+In this case, xgbTree performed the best when evaluated in terms of accuracy. The variable importance for xgbTree is plotted below.
+
+```{r}
+(xAcc$xgbTree %>% varImp())$importance %>% tibble::rownames_to_column("variable") %>% arrange(desc(Overall)) %>% arrange(desc(Overall)) %>% top_n(5) %>%
+ggplot(aes(y=Overall, x=reorder(variable, -Overall))) + geom_col() + ggtitle("Top 5 most important variables in GBTree Classification X Model (Accuracy)")
+```
+
+
+#### ROC
+
+```{r}
+xROC <- list(
+  glmnet_x09_x10_spline_int = readRDS(here("models", "mod_x_6_models_spline_x09_x11_b_AUC.Rds"))$glmnet,
+  nnet_additive = readRDS(here("models", "mod_x_nnet_additive_ROC.Rds")),
+  ranger_additive = readRDS(here("models", "mod_x_ranger_additive_ROC.Rds")),
+  svmPoly_additive = readRDS(here("models", "mod_x_svmPoly_additive_ROC.Rds")),
+  kknn_additive = readRDS(here("models", "mod_x_kknn_additive_ROC.Rds")),
+  xgbTree = readRDS(here("models", "mod_x_xgbTree_additive_ROC.Rds")),
+  glmnet_pairwise_all = readRDS(here("models", "mod_x_glmnet_pairwise_all_b_ROC.Rds"))
+)
+xROC %>% resamples %>% dotplot(metric="ROC", main="ROC For X Variable Models")
+```
+
+Again, in ROC xgbTree performed best. The variable importance for xgbTree is plotted below.
+
+```{r}
+(xROC$xgbTree %>% varImp())$importance %>% tibble::rownames_to_column("variable") %>% arrange(desc(Overall)) %>% arrange(desc(Overall)) %>% top_n(5) %>%
+ggplot(aes(y=Overall, x=reorder(variable, -Overall))) + geom_col() + ggtitle("Top 5 most important variables in GBTree Classification X Model (ROC)")
+```
+
+The below compares the performance of 6 models for the interaction of the splines of x09 and x11, as well as the performance for the elastic net model of pairwise interactions of all x variables, for reference.
+
+### V Variable Models
+
+#### Accuracy
+
+```{r}
+vAcc <- list(
+  spline_pairs_v01v06v10 = readRDS(here("models", "mod_v_6_models_spline_pairs_v01v06v10_Accuracy.Rds"))$glmnet,
+  nnet_additive = readRDS(here("models", "mod_v_nnet_additive_Accuracy.Rds")),
+  ranger_additive = readRDS(here("models", "mod_v_ranger_additive_Accuracy.Rds")),
+  svmPoly_additive = readRDS(here("models", "mod_v_svmPoly_additive_Accuracy.Rds")),
+  kknn_additive = readRDS(here("models", "mod_v_kknn_additive_Accuracy.Rds")),
+  xgbTree = readRDS(here("models", "mod_v_xgbTree_additive_Accuracy.Rds")),
+  glmnet_pairwise_all = readRDS(here("models", "mod_v_glmnet_pairwise_all_b_Acc.Rds"))
+)
+vAcc %>% resamples %>% dotplot(metric="Accuracy", main="Accuracy for V Variable Models")
+```
+
+xgbTree was found to perform the best. The variable importance is plotted below
+
+```{r}
+(vAcc$xgbTree %>% varImp())$importance %>% tibble::rownames_to_column("variable") %>% arrange(desc(Overall)) %>% arrange(desc(Overall)) %>% top_n(5) %>%
+ggplot(aes(y=Overall, x=reorder(variable, -Overall))) + geom_col() + ggtitle("Top 5 most important variables in GBTree Classification V Model (Accuracy)")
+```
+
+
+#### ROC
+
+```{r}
+vROC <- list(
+  spline_pairs_v01v06v10 = readRDS(here("models", "mod_v_6_models_spline_pairs_v01v06v10_ROC.Rds"))$glmnet,
+  nnet_additive = readRDS(here("models", "mod_v_nnet_additive_ROC.Rds")),
+  ranger_additive = readRDS(here("models", "mod_v_ranger_additive_ROC.Rds")),
+  svmPoly_additive = readRDS(here("models", "mod_v_svmPoly_additive_ROC.Rds")),
+  kknn_additive = readRDS(here("models", "mod_v_kknn_additive_ROC.Rds")),
+  xgbTree = readRDS(here("models", "mod_v_xgbTree_additive_ROC.Rds")),
+  glmnet_pairwise_all = readRDS(here("models", "mod_v_glmnet_pairwise_all_b_ROC.Rds"))
+)
+vROC %>% resamples %>% dotplot(metric="ROC", main="ROC for V Variable Models")
+```
+
+Ranger was found to perform the best. The variable importance is plotted below
+
+```{r}
+(vROC$ranger_additive %>% varImp())$importance %>% tibble::rownames_to_column("variable") %>% arrange(desc(Overall)) %>% arrange(desc(Overall)) %>% top_n(5) %>%
+ggplot(aes(y=Overall, x=reorder(variable, -Overall))) + geom_col() + ggtitle("Top 5 most important variables in Random Forest Classification V Model (ROC)")
+```
+
+
+## Best model for maximizing accuracy vs. maximizing area under ROC curve
+
+While with x variables, the xgbBoost model proved to be the best model for maximizing accuracy and the ROC curve, with v Variables xgbTree proved best for maximizing Accuracy and ranger proved best for maximizing ROC, although the performance of both models was roughly equivalent.
+
+## Conclusion
+Overall, the random forest and Gradient boosted trees method proved best for maximizing ROC and accuracy.

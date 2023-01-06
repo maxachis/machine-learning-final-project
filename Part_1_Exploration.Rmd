@@ -1,0 +1,249 @@
+---
+title: "Part_1_Exploration"
+author: "Max Chis"
+date: "11/1/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+## Introduction
+
+This section explores and visualizes the training input and output sets. In some cases, it utilizes information gleaned from the latter sections (such as which variables are identified as most important within the models) to further investigate trends within the data. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggcorrplot)
+library(ggExtra)
+```
+
+## Visualize distribution of variables in data set
+
+```{r}
+df_start <- readr::read_csv('small_train_data.csv', col_names = TRUE)
+train_x <- readr::read_csv("train_input_set_x.csv", col_names = TRUE)
+train_v <- readr::read_csv("train_input_set_v.csv", col_names = TRUE)
+train_outputs <- readr::read_csv("train_outputs.csv", col_names = TRUE)
+```
+
+### Check for missing values
+
+```{r}
+visdat::vis_miss(df_start)
+visdat::vis_miss(train_outputs)
+visdat::vis_miss(train_v)
+visdat::vis_miss(train_x)
+```
+
+No missing values found in data set.
+
+### Check data types
+```{r}
+visdat::vis_dat(df_start)
+visdat::vis_dat(train_outputs)
+visdat::vis_dat(train_v)
+visdat::vis_dat(train_x)
+```
+
+Train_outputs has outcome column of type "character" (likely because it is an event), but other columns of type "numeric".
+Everything else, in other data sets, is of type "numeric".
+
+### Check number of unique values per variable
+
+```{r}
+df_start %>% purrr::map_dbl(n_distinct)
+train_outputs %>% purrr::map_dbl(n_distinct)
+train_v %>% purrr::map_dbl(n_distinct)
+train_x %>% purrr::map_dbl(n_distinct)
+```
+
+All values in datasets are unique.
+
+### Response range
+
+```{r}
+train_outputs %>% count(outcome)
+train_outputs %>% summary()
+```
+
+Response outcome ranges from -1.85 to +1.43
+
+### Association of outcomes with responses
+
+#### Overall
+
+Below is a simple binary modeling of which responses are associated with which outcomes
+```{r}
+train_outputs %>% ggplot(aes(x=response, color=outcome)) + geom_freqpoly(aes(y=stat(density))) + ggtitle("Density of data points with different values, classified by event")
+```
+
+Non_events are notable congregated in the 0,1 range, while events tend to be more uniformly distributed in their frequency of occurrence.
+
+#### By X-Variable
+
+```{r, fig.height=14}
+train_x %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% ggplot(aes(x=value, color=outcome)) + geom_freqpoly(aes(y=stat(density))) + facet_wrap(~name)  + ggtitle("Density of X observations, classified by event: Faceted by Variable Names")
+```
+
+For most variables, the density of events and non-events are roughly the same throughout their range of possible values. Notable exceptions are x09 and x11, which both show areas where event is substantially more likely than non-event or vice versa. 
+
+Below shows a closer look at just x09 and x11
+
+```{r}
+train_x %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% filter(name %in% c("x09","x11")) %>% ggplot(aes(x=value, color=outcome)) + geom_freqpoly(aes(y=stat(density)), size=1) + facet_wrap(~name) + ggtitle("Density of data points at different values, classified by event: x09 and x11")
+```
+
+#### By V-Variable
+
+
+```{r, fig.width=14}
+train_v %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% ggplot(aes(x=value, color=outcome)) + geom_freqpoly(aes(y=stat(density))) + facet_wrap(~name)  + ggtitle("Density of V observations, classified by event: Faceted by Variable Names")
+```
+
+V shows more variables than X  where the event and non-event distribution for individual variables are more sharply distinguished. However, it should be noted that some of the variables have very similar distributions, and that many of these variables, as seen in the correlation visualizations, are also very strongly correlated with one another.
+
+The most important variables identified by my models included v01, v02, v06, v08, v10 and v12. These have been isolated from the rest of the variables and plotted below for greater detail.
+
+```{r}
+train_v %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% filter(name %in% c("v01", "v02", "v06", "v08", "v10", "v12")) %>% ggplot(aes(x=value, color=outcome)) + geom_freqpoly(aes(y=stat(density))) + facet_wrap(~name) + facet_wrap(~name) + ggtitle("Density of V data points vs. value by event classification: Most important variables")
+```
+
+### Boxplots and density of event/non-event outcomes
+
+Below plots the boxplots and the density (as the viollin plot) for the event and non-event outcomes
+```{r}
+train_outputs %>% ggplot(aes(x=outcome, y=response)) + geom_violin() + geom_boxplot(fill=NA) + ggtitle("Boxplot and density of event/non-event outcomes")
+```
+
+As seen in the prior plot, non-events are densely packed in the 0-1 range, while events have a wider distribution
+
+### Correlation Between Variables (Correlation Matrix and other visualizations)
+
+#### df_start
+
+```{r}
+df_start %>% cor() %>% corrplot::corrplot(type="upper", diag=F)
+```
+
+Of the five variables, x09 and x11 show the strongest correlation with the response
+
+
+#### X-Variables
+
+```{r, fig.width = 14, fig.height=14}
+train_x %>% select(!run_id) %>% cor() %>% corrplot::corrplot(type="upper", diag=F)
+```
+
+Most of the x-variables have little to no correlation with one another, although the x18 to x23 variables show some correlation. This is likely because, as is seen in the "Histogram of variable distribution" section, these variables had a high number of observations concentrated in a specific region. 
+
+Tu further illustrate this, below is a bar plot graph of the 10 greatest correlations between x variables.
+```{r}
+train_x_corrs <- train_x %>% select(!run_id) %>% cor() %>% as.data.frame()  %>% 
+rownames_to_column("variable_b1") %>% 
+gather(key = variable_b2, val = Rho, -variable_b1) %>% filter(variable_b1 != variable_b2) %>% 
+  unite(relation, c("variable_b1", "variable_b2")) %>% distinct(Rho, .keep_all=T) %>% arrange(desc(Rho))
+train_x_corrs %>% top_n(10) %>% 
+  ggplot(aes(x=reorder(relation, -Rho), y=Rho, fill=Rho)) + geom_col() + ggtitle("10 Highest correlations between X Variables")
+```
+
+Ultimately, no variables in X are particularly strongly correlated with one another, especially compared to the V variables. This is further illustrated with the below histogram of correlations between x variable pairs, which shows the majority having correlations near 0 and none exceeding 0.2 Rho.
+
+```{r}
+train_x_corrs %>% ggplot(aes(x=Rho)) + geom_histogram() + ggtitle("Histogram of correlation between X variables")
+```
+
+#### V-Variables 
+
+```{r, fig.width = 14, fig.height=14}
+train_v %>% select(!run_id) %>% cor() %>% corrplot::corrplot(type="upper", diag=F)
+```
+
+A number of V variables show high correlations with one another. 
+
+A bar plot of the 10 most correlated variable pairs further illustrates how strongly correlated some of these variables are
+```{r}
+train_v_corrs <- train_v %>% select(!run_id) %>% cor() %>% as.data.frame()  %>% 
+rownames_to_column("variable_b1") %>% 
+gather(key = variable_b2, val = Rho, -variable_b1) %>% filter(variable_b1 != variable_b2) %>% unite(relation, c("variable_b1", "variable_b2"))
+
+train_v_corrs %>% arrange(desc(Rho)) %>% distinct(Rho, .keep_all=T) %>% arrange(desc(Rho)) %>% top_n(10) %>% ggplot(aes(x=reorder(relation, -Rho), y=Rho, fill=Rho)) + geom_col() + ggtitle("10 Highest correlations between V Variables")
+```
+
+As can be seen in the below histogram of variable correlation, most variable pairs are not strongly correlated with each other, but a significant number have very high correlations.
+```{r}
+train_v_corrs %>% ggplot(aes(x=Rho)) + geom_histogram() + ggtitle("Histogram of correlation between V variables")
+```
+
+This should be noted, and models combining highly correlated variables should be averted.
+
+
+### Variable distribution as compared with response
+
+#### df_start
+```{r}
+  df_start %>% pivot_longer(!response, names_to="variable", values_to="value") %>% ggplot(aes(x=value, y=response, color=variable, fill=variable)) + geom_point() + geom_smooth() + facet_wrap(~variable) + ggtitle("Value vs Response of df_start, faceted by variables")
+```
+
+Looking at narrowest bands, and bands with steepest slope appear most promising. That means x09 and x11. Could reasonably suggest a quadratic for both of them. 
+
+#### X-Variables
+
+```{r}
+train_x %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% ggplot(aes(x=value,y=response)) + geom_point(alpha=0.2) + geom_smooth() + facet_wrap(~name) + ggtitle("Value vs Response: All X Variables")
+```
+
+The below zooms in on the two most important variables, as found by my models: x09 and x11
+
+```{r}
+train_x %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% filter(name %in% c('x09', 'x11')) %>% ggplot(aes(x=value,y=response)) + geom_point(alpha=0.2) + geom_smooth() + facet_wrap(~name) + ggtitle("Value vs. Response of x09, x11")
+```
+
+As can also be seen in df_start, x09 and x11 show the most substantial slopes, with other variables relatively flat by comparison.
+
+#### V-Variables
+
+```{r}
+train_v %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% ggplot(aes(x=value,y=response)) + geom_point(alpha=0.2) + geom_smooth() + facet_wrap(~name) + ggtitle("Value vs Response: All V Variables")
+```
+
+Among the v variables, a number show sharp slopes, but they also show sharply *similar* slopes, implying a high correlation. Notable slopes include v01, v02, v06, v08, v10, and v12. These variables were also frequently identified as the most important variables in the models I plotted. These variables alone have been plotted below.
+
+```{r}
+train_v %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% filter(name %in% c("v01", "v02", "v06", "v08", "v10", "v12")) %>% ggplot(aes(x=value,y=response)) + geom_point(alpha=0.2) + geom_smooth() + facet_wrap(~name) + ggtitle("Value vs Response: Most Important V Variables")
+```
+
+### Histogram of variable distribution
+
+#### df_start
+
+```{r}
+df_start %>% pivot_longer(!response, names_to="variable", values_to="value") %>% ggplot(aes(x=value)) + geom_histogram(binwidth=0.10) + facet_wrap(~variable) + ggtitle("Histogram of Variable Distribution, df_start")
+```
+
+All variables in the df_start dataset are roughly uniformly distributed, with more values in middle bins than at the margins.
+
+#### X-Variables
+
+```{r}
+train_x %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% ggplot(aes(x=value)) + geom_histogram() + facet_wrap(~name) + ggtitle("Histogram of Variable Distribution, X Variables")
+```
+
+Most of the x variables appear uniformly distributed. Notably, however, variables from x18 to x23 show a high frequency of observations in the 0.60-0.80 range. This suggestion a combination of variables that was of particular interest during data collection.
+
+As an aside, the variables for x18 to x23 appear to have had their more concentrated areas of the distribution generated separately from the more uniform distributions, as seen in the below run graph of x21.
+
+```{r, fig.width=14}
+train_x %>% ggplot(aes(x=run_id, y=x21)) + geom_point() + geom_line() + ggtitle("Run Graph of Variable x21")
+```
+
+Initially a broader set of data was generated, but a narrower range was generated later. May not be relevant, but interesting to note.
+
+#### V-Variables
+
+```{r}
+train_v %>% left_join(train_outputs, by='run_id') %>% pivot_longer(!c('run_id','response','outcome')) %>% ggplot(aes(x=value)) + geom_histogram() + facet_wrap(~name)  + ggtitle("Histogram of Variable Distribution, V Variables")
+```
+
+V variables show a more variable distribution of observations, with some particularly dense in the margins, while others showing a left or right skew, and still others uniform in their distribution.

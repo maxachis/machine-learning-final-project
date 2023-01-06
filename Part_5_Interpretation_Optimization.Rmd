@@ -1,0 +1,278 @@
+---
+title: 'Part 5 : Interpretation/Optimization'
+author: "Max Chis"
+date: "11/25/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(here)
+```
+
+## Introduction
+
+This section compares the performance of the best V variable models with the performance of the best X variable models, predicts the continuous output as well as event probability based on the values of those most important variables, and then plots these predictions. These plots are then used to identify which values of these variables minimize the continuous output and event probability. 
+
+The most important variables for the models were previously identified in Parts 3 and 4. While with the x-variables, the most important variables were consistently x09 and x11, with the v-variables, the most important variables changed depending on the model and the method of measurement. For the best performing models in terms of RMSE (for Regression) and Accuracy and ROC (for classification), the most important variables in order of their importance are as follows:
+
+RMSE: v10, v12, v08
+
+Acc: v10, v02, v06
+
+ROC: v01, v10, v12
+
+As such, the most important variables are visualized separately for each of these. 
+
+A significant caveat is required for the above v-models: All of them are highly correlated with each other; at least at a correlation of 0.5, and in below cases closer to 1:
+
+v01 with v02
+
+v10 with v12
+
+v06 with v08
+
+The accuracy model is the only one of these models that doesn't involve the combination of the highly-correlated v10 and v12. 
+
+Finally, at the end I added an optim section, running the models through an optimization to identify what was considered the best values for the variables.
+
+## Model Loading
+
+```{r, eval=TRUE}
+xRMSE_xgbTree <- readRDS(here("models", "mod_x_xgbTree_additive.Rds"))
+vRMSE_Ranger <- readRDS(here("models", "mod_v_ranger_additive_RMSE.Rds"))
+xROC_xgbTree <- readRDS(here("models", "mod_x_xgbTree_additive_ROC.Rds"))
+vROC_Ranger <- readRDS(here("models", "mod_v_ranger_additive_ROC.Rds"))
+xAcc_xgbTree <-readRDS(here("models", "mod_x_xgbTree_additive_Accuracy.Rds"))
+vAcc_xgbTree <-readRDS(here("models", "mod_v_xgbTree_additive_Accuracy.Rds"))
+```
+
+```{r, eval=TRUE}
+train_x <- readr::read_csv("train_input_set_x.csv", col_names = TRUE) %>% select(!run_id)
+train_v <- readr::read_csv("train_input_set_v.csv", col_names = TRUE) %>% select(!run_id)
+```
+
+## Visualization Grids
+Because the best-performing models for v in terms of RMSE, Accuracy, and ROC all differed in terms of their most important variables, I created separate visualization grids for each of them, setting all other variables but the three identified most important variables to their median from the train set. 
+```{r, eval=TRUE}
+viz_grid_x <- expand.grid(x11 = seq(from=0, to=1, length.out=101),
+                        x09 = seq(from=0, to=1, length.out=6),
+                        merge_id=1,
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% left_join(
+train_x %>% apply(2, median) %>% as.data.frame() %>% tibble::rownames_to_column("variable") %>%  pivot_wider(names_from="variable", values_from=".") %>% select(!c(x09, x11)) %>% mutate(merge_id=1)
+) %>% select(!merge_id)
+
+viz_grid_v_RMSE <- expand.grid(v10 = seq(from=0, to=1, length.out=101),
+                        v12 = seq(from=0, to=1, length.out=3),
+                        v08 = seq(from=0, to=1, length.out=3),
+                        merge_id=1,
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% left_join(
+train_v %>% apply(2, median) %>% as.data.frame() %>% tibble::rownames_to_column("variable") %>%  pivot_wider(names_from="variable", values_from=".") %>% select(!c(v10, v12, v08)) %>% mutate(merge_id=1)
+) %>% select(!merge_id)
+
+viz_grid_v_Acc <- expand.grid(v10 = seq(from=0, to=1, length.out=101),
+                        v02 = seq(from=0, to=1, length.out=3),
+                        v06 = seq(from=0, to=1, length.out=3),
+                        merge_id=1,
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% left_join(
+train_v %>% apply(2, median) %>% as.data.frame() %>% tibble::rownames_to_column("variable") %>%  pivot_wider(names_from="variable", values_from=".") %>% select(!c(v10, v02, v06)) %>% mutate(merge_id=1)
+) %>% select(!merge_id)
+
+viz_grid_v_ROC <- expand.grid(v01 = seq(from=0, to=1, length.out=101),
+                        v10 = seq(from=0, to=1, length.out=3),
+                        v12 = seq(from=0, to=1, length.out=3),
+                        merge_id=1,
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% left_join(
+train_v %>% apply(2, median) %>% as.data.frame() %>% tibble::rownames_to_column("variable") %>%  pivot_wider(names_from="variable", values_from=".") %>% select(!c(v01, v10, v12)) %>% mutate(merge_id=1)
+) %>% select(!merge_id)
+
+```
+
+## Do v-variables or x-variables give the better model?
+### Regression
+
+For the regression models, Random Forest was the best performer for V, and Gradient Boosted Trees the best performer for X. The below code extracts both and then compares their results in terms of RMSE.
+
+```{r, eval=TRUE}
+list(v = vRMSE_Ranger,
+     x = xRMSE_xgbTree) %>% resamples() %>% dotplot(metric="RMSE", main="RMSE of Top-Performing Regression Models")
+```
+
+The v model appears to perform somewhat better than the v model in regression, in terms of RMSE.
+
+### Classification
+
+#### Accuracy
+```{r, eval=TRUE}
+list(x = xAcc_xgbTree, v = vAcc_xgbTree) %>% 
+  resamples %>% dotplot(metric="Accuracy", main="Accuracy of Top-Performing Classification Models")
+```
+
+The v model appears to perform better than the x model in terms of accuracy.
+
+#### ROC
+```{r, eval=TRUE}
+list(x = xROC_xgbTree, v = vROC_Ranger) %>% 
+  resamples %>% dotplot(metric="ROC", main="ROC of Top-Performing Classification Models")
+```
+
+Both the x and v models showed similar ROC values, with v possibly performing slightly better.
+
+## Visualizing predicted continuous output as a function of identified most important variables 
+
+Here, I visualize predicted continuous output as a function of identified most important variables and identify, through these visualizations, which input settings are associated with minimizing output.
+
+### x: x09 and x11
+
+```{r}
+xRMSE_xgbTree %>% predict(newdata = viz_grid_x) %>% 
+    as.data.frame() %>% tibble::rowid_to_column("pred_id") %>% 
+  left_join(viz_grid_x %>% tibble::rowid_to_column("pred_id"),
+            by = "pred_id") %>%
+    ggplot(aes(x=x11)) +    
+  geom_line(mapping = aes(y = .), size=1.) + 
+  facet_wrap(~x09, labeller = "label_both") + labs(y = "predicted output") +
+  theme_bw() +
+  theme(legend.position = "top") + ggtitle("x11 Value vs Predicted Mean Trend, x09 facets, GB Tree")
+```
+
+Maximizing values of x09 and x11 minimizes predicted continuous output.
+
+### v: v10, v12, v08
+
+```{r}
+vRMSE_Ranger %>% predict(newdata = viz_grid_v_RMSE) %>% 
+  as.data.frame() %>% tibble::as_tibble() %>% 
+  tibble::rowid_to_column("pred_id") %>% 
+  left_join(viz_grid_v_RMSE %>% tibble::rowid_to_column("pred_id"),
+            by = "pred_id") %>%   ggplot(aes(x=v10)) +  
+  geom_line(mapping = aes(y = .), size=1.) + 
+  facet_grid(vars(v12), vars(v08), labeller = labeller(.rows = label_both, .cols = label_both)) + labs(y = "mean trend") +
+  theme_bw() +
+  theme(legend.position = "top") + ggtitle("v10 Value vs Predicted Mean Trend, v08/v12 facets, Random Forest")
+```
+
+Maximizing v08, v10, and v12 minimizes the predicted event probability.
+
+
+## Visualizing predicted event probability as a function of identified most important variables 
+
+Here, I visualize predicted event probability as a function of identified most important variables and identify, through these visualizations, which input settings are associated with minimizing event probability.
+
+### x: x09 and x11
+```{r}
+m <- xROC_xgbTree %>% predict(newdata = viz_grid_x,  type = "prob") 
+colnames(m) <- c('nonevent', 'event')
+m %>% as.data.frame() %>% tibble::rowid_to_column("pred_id") %>% left_join(viz_grid_x %>%
+  tibble::rowid_to_column("pred_id"),
+    by = "pred_id") %>%
+  ggplot(aes(x=x11)) +   
+  geom_line(mapping = aes(y = event, group = x09), size=1.) + 
+  facet_wrap(~x09, labeller = "label_both") + labs(y = "predicted event probability") +
+  theme_bw() +
+  theme(legend.position = "top") + ggtitle("x11 Value vs Predicted Event Probability, x09 facets, GB Tree (ROC)")
+```
+
+
+Maximizing values of x09 and x11 appears to minimize event probability.
+
+### v_Accuracy: v10, v02, v06
+
+```{r}
+m <- vAcc_xgbTree %>% predict(newdata = viz_grid_v_Acc,  type = "prob") 
+colnames(m) <- c('nonevent', 'event')
+m %>% as.data.frame() %>% tibble::rowid_to_column("pred_id") %>% left_join(viz_grid_v_Acc %>%
+  tibble::rowid_to_column("pred_id"),
+    by = "pred_id") %>%
+  ggplot(aes(x=v10)) +   
+  geom_line(mapping = aes(y = event), size=1.) + 
+  facet_grid(vars(v02), vars(v06),labeller = labeller(.rows = label_both, .cols = label_both))+
+  theme_bw() +
+  theme(legend.position = "top") + ggtitle("v10 Value vs Predicted Event Probability, v02/v06 facets, GB Tree (Accuracy)")
+```
+
+Maximizing values of v02, v06, and v10 appears to minimize event probability.
+
+### v_ROC: v01, v10, v12
+
+```{r}
+m <- vROC_Ranger %>% predict(newdata = viz_grid_v_ROC,  type = "prob") 
+colnames(m) <- c('nonevent', 'event')
+m %>% as.data.frame() %>% tibble::rowid_to_column("pred_id") %>% left_join(viz_grid_v_ROC %>%
+  tibble::rowid_to_column("pred_id"),
+    by = "pred_id") %>%
+  ggplot(aes(x=v01)) +   
+  geom_line(mapping = aes(y = event), size=1.) + 
+  facet_grid(vars(v10), vars(v12),labeller = labeller(.rows = label_both, .cols = label_both))+
+  theme_bw() +
+  theme(legend.position = "top") + ggtitle("v01 Value vs Predicted Event Probability, v10/v12 facets, Random Forest (ROC)")
+```
+
+Maximizing v01, v10, and v12 appears to minimize event probability.
+
+## (Bonus) Optimize inputs using optim().
+
+
+```{r}
+run_prediction <- function(vec, model) {
+    data <- matrix(vec, ncol = length(model$coefnames)) %>% 
+      as.data.frame() %>% 
+      setNames(., model$coefnames)
+    return(predict(object=model, newdata=data))
+}
+```
+
+```{r}
+run_prediction_prob <- function(vec, model) {
+    data <- matrix(vec, ncol = length(model$coefnames)) %>% 
+      as.data.frame() %>% 
+      setNames(., model$coefnames)
+    return(predict(object=model, newdata=data, type="prob"))
+}
+```
+
+
+### xRMSE_xgbTree
+```{r}
+vec <- as.vector((sample.int(101,size=length(xRMSE_xgbTree$coefnames),replace=TRUE)-1)/100)
+optim(par = vec, fn = run_prediction, model=xRMSE_xgbTree)
+```
+### vRMSE_Ranger
+```{r}
+vec <- as.vector((sample.int(101,size=length(vRMSE_Ranger$coefnames),replace=TRUE)-1)/100)
+optim(par = vec, fn = run_prediction, model=vRMSE_Ranger)
+```
+
+### vAcc_xgbTree
+```{r}
+vec <- as.vector((sample.int(101,size=length(vAcc_xgbTree$coefnames),replace=TRUE)-1)/100)
+optim(par = vec, fn = run_prediction, model=vAcc_xgbTree)
+```
+
+### vROC_Ranger
+```{r}
+vec <- as.vector((sample.int(101,size=length(vROC_Ranger$coefnames),replace=TRUE)-1)/100)
+optim(par = vec, fn = run_prediction, model=vROC_Ranger)
+```
+
+### xAcc_xgbTree
+```{r}
+vec <- as.vector((sample.int(101,size=length(xAcc_xgbTree$coefnames),replace=TRUE)-1)/100)
+optim(par = vec, fn = run_prediction, model=xAcc_xgbTree)
+```
+
+### xROC_xgbTree
+```{r}
+vec <- as.vector((sample.int(101,size=length(xAcc_xgbTree$coefnames),replace=TRUE)-1)/100)
+optim(par = vec, fn = run_prediction, model=xAcc_xgbTree)
+```
+

@@ -1,0 +1,198 @@
+---
+title: "Part 3 Regression"
+author: "Max Chis"
+date: "11/16/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(here)
+```
+
+## Intro
+
+This section analyzes the performance of the regression models for the X and V variables.
+
+For both X and V variables, I utilized the same set of models for the complex model-fitting. These models were:
+* Neural Network 
+* K Nearest Neigbhors
+* Support Vector Machine
+* Elastic Net
+* Random Forest
+* Gradient Boosted Trees
+
+I also utilized an additional glmnet model that focused on the interaction of the splines of a limited array of variables:
+
+For X, these variables were x09 and x11, which showed the strongest correlation with the response value in data exploration, and were associated with the most distinct binary output probabilities. I eschewed other variables due to both an interest in simplicity and out of observation that their influences were much more marginal. These models likely could be further improved with the addition of some of the other variables, but I believe x09 and x11 contribute the most to the overall performance. I utilized spline interactions as spline modeling appeared to capture the nuance and complexity within the relationship of both variables to the response and binary output probabilities.
+
+For V variables, I relied on a model of the pairwise spline interactions of v01, v06, and v10. My rationale for using splines with these models, and in eschewing other variables, is the same as when using splines for the x variable models. With these models, I believe my eschewing of other variables is further justified by the high correlation between many variables, which would make including too many of them problematic. Again, these models could be further improved with additional amendments to the formula, but I believe the majority of the performance can be obtained using the splines of these three variables alone.
+
+Ultimately, these more limited models did not do as well as other models which utilized the entire set of variables, such as Random Forest and Gradient Boosted Trees, but they also did not perform as poorly as other models, most commonly neural networks and K Nearest Neighbor, which often performed substantially worse than the average model. It is not clear to me why this is the case.
+
+## Comparing Linear Models
+
+### X Variables
+
+#### Linear additive features
+
+All x inputs with additive features
+```{r, eval=TRUE}
+mod_x_additive_all <- readRDS(here("models", "mod_x_additive_all.Rds"))
+```
+
+```{r, eval=TRUE}
+#Get names of significant coefficients
+sig_names <- summary(mod_x_additive_all)$coefficients %>% data.frame() %>% filter(Pr...t.. < 0.01) %>% rownames()
+#Plot significant coefficients
+mod_x_additive_all %>% coefplot::coefplot(coefficients=sig_names)
+```
+
+Plotting only coefficients with a p-value for the t-test less than 0.01 shows x11 and x09 performing the best, with several other variables also performing at significance.
+
+#### All pair-wise interactions between inputs
+
+All x inputs and interactions
+```{r, eval=TRUE}
+mod_x_pairwise_all <- readRDS(here("models", "mod_x_pairwise_all.Rds"))
+mod_x_pairwise_all %>% broom::glance()
+```
+
+```{r, eval=TRUE}
+#Get names of significant coefficients
+sig_names <- summary(mod_x_pairwise_all)$coefficients %>% data.frame() %>% filter(Pr...t.. < 0.01) %>% rownames()
+#Plot significant coefficients
+mod_x_pairwise_all %>% coefplot::coefplot(coefficients=sig_names)
+```
+
+Plotting only coefficients with a p-value for the t-test less than 0.01 shows the interaction of x09 and x11 as most significant, although several other interactions, often but not exclusively variables in interaction with x09 or x11, also proved significant.
+
+
+#### One model with features consistent with features from top performing models in simplified "Getting started" portion of project
+
+The spline of x09 and x11
+```{r, eval=TRUE}
+mod_x_spline_x09_x11 <- readRDS(here("models", "mod_x_spline_x09_x11.Rds"))
+mod_x_spline_x09_x11 %>% broom::glance()
+```
+
+```{r, eval=TRUE}
+#Get names of significant coefficients
+sig_names <- summary(mod_x_spline_x09_x11)$coefficients %>% data.frame() %>% filter(Pr...t.. < 0.01) %>% rownames()
+#Plot significant coefficients
+mod_x_spline_x09_x11 %>% coefplot::coefplot(coefficients=sig_names)
+```
+
+#### Comparing Performance 
+```{r}
+m <- rbind(mod_x_additive_all %>% broom::glance(), mod_x_pairwise_all %>% broom::glance(), mod_x_spline_x09_x11 %>% broom::glance()) %>% as.data.frame() 
+rownames(m) <- c("additive_all", "pairwise_all", "spline_x09_x11")
+m %>% select(AIC, BIC, sigma)
+```
+
+The AIC and BIC scores for the spline model were substantially superior to pairwise or additive, although pairwise did ultimately have the lower sigma. If I were to choose among these, I would select spline, for despite the worse sigma score it seems to be at substantially lower risk for overfitting.
+
+### V Variables
+
+#### Linear additive features
+
+All v inputs with additive features
+```{r, eval=TRUE}
+mod_v_additive_all <- readRDS(here("models", "mod_v_additive_all.Rds"))
+mod_v_additive_all %>% broom::glance()
+```
+
+```{r, eval=TRUE}
+#Get names of significant coefficients
+sig_names <- summary(mod_v_additive_all)$coefficients %>% data.frame() %>% filter(Pr...t.. < 0.01) %>% rownames()
+#Plot significant coefficients
+mod_v_additive_all %>% coefplot::coefplot(coefficients=sig_names)
+```
+
+Plotting only coefficients with a p-value for the t-test less than 0.01 shows v10, v06, and v01 as the most significant coefficients.
+
+#### All pair-wise interactions between inputs
+
+All v inputs and interactions
+```{r, eval=TRUE}
+mod_v_pairwise_all <- readRDS(here("models", "mod_v_pairwise_all.Rds"))
+mod_v_pairwise_all %>% broom::glance()
+```
+
+```{r, eval=TRUE}
+#Get names of significant coefficients
+sig_names <- summary(mod_v_pairwise_all)$coefficients %>% data.frame() %>% filter(Pr...t.. < 0.01) %>% rownames()
+#Plot significant coefficients
+mod_v_pairwise_all %>% coefplot::coefplot(coefficients=sig_names)
+```
+
+Plotting only coefficients with a p-value for the t-test less than 0.01 shows the interaction of v04:v08 as most significant, although several other interactions, including some involving v01 and v06, are also significant. 
+
+
+## Evaluate/Compare Caret Train Models
+
+### X Variable Models
+
+#### Models considered and used
+
+Utilizing the information derived from the starter dataset, I quickly decided to focus on models including the interaction of the splines of x09 and x11. These boasted the highest performance among the train dataset, and analysis of the most significant coefficients of the pairwise-interactions further reinforced the notion of x09 and x11 being strong contenders, particularly in interaction with one other.
+
+#### Evaluating and Comparing Models
+
+The below compares the performance of 6 models for the interaction of the splines of x09 and x11, as well as the performance for the elastic net model of pairwise interactions of all x variables, for reference.
+
+```{r}
+xRMSE <- list(
+  glmnet_x09_x11_spline_int = readRDS(here("models", "mod_x_6_models_spline_x09_x11_RMSE.Rds"))$glmnet,
+  nnet = readRDS(here("models", "mod_x_nnet_additive.Rds")),
+  ranger = readRDS(here("models", "mod_x_ranger_additive.Rds")),
+  svmPoly = readRDS(here("models", "mod_x_svmPoly_additive.Rds")),
+  kknn = readRDS(here("models", "mod_x_kknn_additive.Rds")),
+  xgbTree = readRDS(here("models", "mod_x_xgbTree_additive.Rds")),
+  glmnet_pairwise_all = readRDS(here("models", "mod_x_enet_pairwise_all.Rds"))
+)
+xRMSE %>% resamples %>% dotplot(metric="RMSE", main="RMSE for X Variable Models")
+```
+
+Using RMSE, xgbTree performed best amid the available options, and hence I elected to use the xgb model as my final model for x-variable regression..
+
+The most important variables for this model can be seen below.
+
+```{r}
+(xRMSE$xgbTree %>% varImp())$importance %>% tibble::rownames_to_column("variable") %>% arrange(desc(Overall)) %>% arrange(desc(Overall)) %>% top_n(5) %>%
+ggplot(aes(y=Overall, x=reorder(variable, -Overall))) + geom_col() + ggtitle("Top 5 most important variables in Gradient Boosted Tree Regression Model")
+```
+
+### V Variable Models
+
+#### Models considered and used
+V models considered tended to involve interactions of v01, v06, and v10, and varied from considering the triplet interactions of all splines (a particularly time-intensive model to generate) to considering the splines of v10 in interaction with the singular variables of v01, v06, and v08.  Ultimately, these models performed similarly to another, and I chose the model which focused on the pairwise interactions of the splines of v01, v06, and v10, in the belief that this avoided the complexity of some of my more sophisticated models while still being sufficiently comprehensive. 
+
+The model for all pair-wise interactions between inputs via regularized regression with Elastic net was included for reference.
+
+```{r}
+vRMSE <- list(
+  glmnet_v01_v06_v10_spline_int = readRDS(here("models", "mod_v_6_models_spline_pairs_v01v06v10_r.Rds"))$glmnet,
+  nnet = readRDS(here("models", "mod_v_nnet_additive_RMSE.Rds")),
+  ranger = readRDS(here("models", "mod_v_ranger_additive_RMSE.Rds")),
+  svmPoly = readRDS(here("models", "mod_v_svmPoly_additive_RMSE.Rds")),
+  kknn = readRDS(here("models", "mod_v_kknn_additive_RMSE.Rds")),
+  xgbTree = readRDS(here("models", "mod_v_xgbTree_additive_RMSE.Rds")),
+  glmnet_pairwise_all = readRDS(here("models", "mod_v_enet_pairwise_all.Rds"))
+)
+vRMSE %>% resamples %>% dotplot(metric="RMSE", main="RMSE For V Variable Models")
+```
+
+#### Evaluating and Comparing Models
+
+In contrast with the v variables, here the ranger model performed best, and hence I will use it for regression for the v variable. The most important variables are included below.
+
+```{r}
+(vRMSE$ranger %>% varImp())$importance %>% tibble::rownames_to_column("variable") %>% arrange(desc(Overall)) %>% arrange(desc(Overall)) %>% top_n(5) %>%
+ggplot(aes(y=Overall, x=reorder(variable, -Overall))) + geom_col() + ggtitle("Top 5 most important variables in Random Forest Regression V Model")
+```

@@ -1,0 +1,125 @@
+---
+title: "Rejected Models"
+author: "Max Chis"
+date: "12/1/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### mod_v_6_models_spline_v01_v02_RMSE
+
+Interaction of all splines of v01 and v02.
+Rejected due to high RMSE (in range of 0.60-0.70)
+
+Formula for interactions, pairwise, of spline of v01 and v02, response
+```{r, eval=TRUE, include=TRUE}
+form_spline_v01_v02 <- Formula(response ~ splines::ns(v01, df=5)*splines::ns(v02, df=5))
+```
+
+Formula for interactions, pairwise, of spline of v01 and v02, binary output
+```{r, eval=TRUE, include=TRUE}
+form_spline_v01_v02_b <- Formula(b_output ~ splines::ns(v01, df=5)*splines::ns(v02, df=5))
+```
+
+Six different models for the spline of v01 and v02:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+
+Generate RMSE Model
+```{r eval=FALSE, include=TRUE}
+run_name_save_multi_model(filename="mod_v_6_models_spline_v01_v02_RMSE", model_names=mod_names, formula=form_spline_v01_v02, metric='RMSE', data=train_v_r, ctrl=ctrl)
+```
+Using proc.time() to time myself, this took roughly 5 minutes to train.
+
+Generate Accuracy Model
+```{r}
+run_name_save_multi_model(filename="mod_v_6_models_spline_v01_v02_b_Acc", model_names=mod_names, formula=form_spline_v01_v02_b, metric='Accuracy', data=train_v_o, ctrl=ctrl)
+```
+
+Generate ROC Model
+```{r}
+run_name_save_multi_model(filename="mod_v_6_models_spline_v01_v02_b_ROC", model_names=mod_names, formula=form_spline_v01_v02_b, metric='ROC', data=train_v_o, ctrl=ctrl_ROC)
+```
+
+Read in file
+```{r}
+mod_v_6_models_spline_v01_v02_RMSE <- readRDS(here("models", "mod_v_6_models_spline_v01_v02_RMSE.Rds"))
+```
+
+Dotplot 
+```{r}
+all_fit_metrics <- mod_v_6_models_spline_v01_v02_RMSE %>% resamples()
+dotplot(all_fit_metrics, metric = "RMSE")
+```
+
+### mod_v_6_models_spline_v10_int_v01v06_v08_r
+Six different models for the pairwise interactions of all splines of v10 with the variables of v01, v06, and v08
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+```{r message=FALSE, warning=FALSE, results = 'hide', include=TRUE, eval=FALSE}
+run_name_save_multi_model(filename="mod_v_6_models_spline_v10_int_v01v06_v08_r", model_names=mod_names, formula=form_spline_v10_int_v01v06_v08_r, metric='RMSE', data=train_v_r, ctrl=ctrl)
+```
+
+#### RMSE 
+Rejected due to insufficiently distinct performance compared with other models
+```{r}
+mod_v_6_models_spline_v10_int_v01v06_v08_r <- readRDS(here("models", "mod_v_6_models_spline_v10_int_v01v06_v08_r.Rds"))
+mod_v_6_models_spline_v10_int_v01v06_v08_r %>% resamples() %>% dotplot(metric="RMSE", main="spline_v10_int_v01v06_v08_r")
+mod_v_6_models_spline_v10_int_v01v06_v08_r$glmnet$finalModel %>% coefplot::coefplot()
+```
+
+### mod_v_6_models_spline_v01v06v10
+Six different models for all pairwise and triplet interactions of the splines of v01, v06 and v10. Rejected due to performance insufficiently distinct from simpler models, and excessive length of training time. 
+
+#### RMSE
+```{r}
+mod_v_6_models_spline_v01v06v10_RMSE <- readRDS(here("models", "mod_v_6_models_spline_v01v06v10_RMSE.Rds"))
+mod_v_6_models_spline_v01v06v10_RMSE %>% resamples() %>% dotplot(metric="RMSE", main="spline_v01v06v10_RMSE")
+mod_v_6_models_spline_v01v06v10_RMSE$glmnet$finalModel %>% coefplot::coefplot()
+```
+
+#### Accuracy
+, with response value as binary input, modeled to maximize Accuracy:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+
+```{r eval=FALSE, include=TRUE}
+run_name_save_multi_model(filename="mod_spline_v10_int_v01v06_v08_b_Acc", model_names=mod_names, formula=form_spline_v10_int_v01v06_v08_b, metric='Accuracy', data=train_v_o, ctrl=ctrl)
+```
+
+
+#### AUC
+Six different models for all pairwise and triplet interactions of the splines of v01, v06 and v10, with response value as binary input, modeled to maximize ROC:
+* Elastic Net
+* Neural Network
+* Random Forest
+* Gradient Boosted Tree
+* Support Vector Machine with Polynomial Kernel
+* K-Nearest neighbor
+
+```{r eval=FALSE, include=TRUE}
+run_name_save_multi_model(filename="mod_spline_v10_int_v01v06_v08_b_ROC", model_names=mod_names, formula=form_spline_v10_int_v01v06_v08_b, metric='ROC', data=train_v_o, ctrl=ctrl_ROC)
+```
+Rejected due to inferior performance, over-complexity, and excessive length of training time.
+
+
+

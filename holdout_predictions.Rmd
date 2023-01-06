@@ -1,0 +1,69 @@
+---
+title: "Holdout Predictions"
+author: "Max Chis"
+date: "12/6/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+```
+
+# Holdout set predictions
+```{r}
+holdout_x <- readr::read_csv("holdout_inputs_x.csv", col_names = TRUE)
+holdout_v <- readr::read_csv("holdout_inputs_v.csv", col_names = TRUE)
+```
+
+# Models
+```{r}
+xRMSE_xgbTree <- readRDS(here("models", "mod_x_xgbTree_additive.Rds"))
+vRMSE_Ranger <- readRDS(here("models", "mod_v_ranger_additive_RMSE.Rds"))
+xAcc_xgbTree <-readRDS(here("models", "mod_x_xgbTree_additive_Accuracy.Rds"))
+vAcc_xgbTree <-readRDS(here("models", "mod_v_xgbTree_additive_Accuracy.Rds"))
+```
+
+# Continuous Output Predictions
+```{r}
+xRMSE_xgbTree %>% predict(holdout_x) %>% head()
+vRMSE_Ranger %>% predict(holdout_v) %>% head()
+```
+
+# Binary Output Predictions
+```{r}
+xAcc_xgbTree %>% predict(holdout_x) %>% head()
+vAcc_xgbTree %>% predict(holdout_v) %>% head()
+```
+
+# Compile Predictions
+## X
+```{r}
+my_preds_x <- tibble::tibble(
+  response = xRMSE_xgbTree %>% predict(holdout_x),
+  outcome = xAcc_xgbTree %>% predict(holdout_x)
+  ) %>% 
+  bind_cols(
+    xAcc_xgbTree %>% predict(holdout_x, type='prob') %>% 
+      select(probability = event)) %>% 
+  tibble::rowid_to_column("id")
+```
+## V
+```{r}
+my_preds_v <- tibble::tibble(
+  response = vRMSE_Ranger %>% predict(holdout_v),
+  outcome = vAcc_xgbTree %>% predict(holdout_v)
+  ) %>% 
+  bind_cols(
+    vAcc_xgbTree %>% predict(holdout_v, type='prob') %>% 
+      select(probability = event)) %>% 
+  tibble::rowid_to_column("id")
+```
+
+# Write to File
+```{r}
+my_preds_x %>% readr::write_csv("preds_caret_x.csv", col_names = TRUE)
+my_preds_v %>% readr::write_csv("preds_caret_v.csv", col_names = TRUE)
+```
+
